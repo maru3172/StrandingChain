@@ -45,4 +45,8 @@ public:
 	/** 카드 내용 갱신 — Blueprint에서 텍스트/이미지 세팅 */
 	UFUNCTION(BlueprintImplementableEvent, Category = "SC|Card")
 	void OnCardInitialized(const FSCSkillData& SkillData);
+
+protected:
+	virtual FReply NativeOnPreviewMouseButtonDown(const FGeometry& InGeometry, const FPointerEvent& InMouseEvent) override;
+	virtual void NativeOnDragDetected(const FGeometry& InGeometry, const FPointerEvent& InMouseEvent, UDragDropOperation*& OutOperation) override;
 };

@@ -1,9 +1,5 @@
 ﻿// Copyright StrandingChain. All Rights Reserved.
 // File: Source/StrandingChain/Battle/SCBattlePlayerController.h
-// 역할: 배틀 씬 전용 PlayerController
-//       - WASD 좌우 카메라 이동
-//       - 마우스 휠 줌인/아웃
-//       - 아군 캐릭터 클릭 → 스킬 패널 표시
 
 #pragma once
 
@@ -14,6 +10,7 @@
 class ASCBattleArena;
 class ASCCharacterBase;
 class USCSkillPanelWidget;
+class USCTurnManager;
 
 UCLASS(Blueprintable)
 class STRANDINGCHAIN_API ASCBattlePlayerController : public APlayerController
@@ -23,7 +20,7 @@ class STRANDINGCHAIN_API ASCBattlePlayerController : public APlayerController
 public:
 	ASCBattlePlayerController();
 
-	// ── 카메라 이동 설정 ─────────────────────
+	// ── 카메라 ───────────────────────────────
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "SC|Camera")
 	float CameraMoveSpeed = 600.f;
 
@@ -37,19 +34,31 @@ public:
 	float ZoomMax = 2500.f;
 
 	// ── 스킬 패널 ────────────────────────────
-	/** Blueprint에서 WBP_SkillPanel 클래스 지정 */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "SC|UI")
 	TSubclassOf<USCSkillPanelWidget> SkillPanelClass;
 
-	/** 현재 열린 스킬 패널 인스턴스 */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "SC|UI")
 	TObjectPtr<USCSkillPanelWidget> SkillPanelWidget;
 
-	/** 현재 선택된 아군 캐릭터 */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "SC|UI")
 	TWeakObjectPtr<ASCCharacterBase> SelectedCharacter;
 
-	/** 패널 닫기 (외부에서도 호출 가능) */
+	// ── 배틀 액션 ────────────────────────────
+	/**
+	 * 큐 위젯 슬롯 내용을 읽어 캐릭터 SkillQueue에 등록하고
+	 * TurnManager->ConfirmAndExecuteQueue 호출.
+	 * WBP_SkillQueue의 "실행" 버튼에 연결.
+	 */
+	UFUNCTION(BlueprintCallable, Category = "SC|Battle")
+	void ConfirmSkillQueue();
+
+	/**
+	 * 현재 캐릭터 턴을 건너뜀.
+	 * WBP_SkillQueue의 "건너뛰기" 버튼에 연결.
+	 */
+	UFUNCTION(BlueprintCallable, Category = "SC|Battle")
+	void SkipCurrentTurn();
+
 	UFUNCTION(BlueprintCallable, Category = "SC|UI")
 	void CloseSkillPanel();
 
@@ -60,6 +69,7 @@ protected:
 
 private:
 	TWeakObjectPtr<ASCBattleArena> ArenaRef;
+	TWeakObjectPtr<USCTurnManager> TurnManagerRef;
 	float MoveAxisValue = 0.f;
 
 	void ZoomIn();
@@ -69,4 +79,9 @@ private:
 
 	void TrySelectCharacter();
 	void OpenSkillPanel(ASCCharacterBase* InCharacter);
+
+	// ── TurnManager 델리게이트 콜백 ──────────
+	// 파라미터명을 InCharacter로 사용 — AController::Character 섀도잉 방지 (UE5.7 UHT 규칙)
+	UFUNCTION()
+	void OnCharacterTurnBeginHandler(ASCCharacterBase* InCharacter);
 };

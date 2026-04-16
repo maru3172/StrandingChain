@@ -1,4 +1,7 @@
-﻿// File: Source/StrandingChain/Battle/Skills/SCSkill_Heal.cpp
+﻿// Copyright StrandingChain. All Rights Reserved.
+// File: Source/StrandingChain/Battle/Skills/SCSkill_Heal.cpp
+// 회복 스킬 — 시전자(Caster) 자신을 회복. Targets는 사용하지 않음.
+
 #include "SCSkill_Heal.h"
 #include "Battle/SCCharacterBase.h"
 #include "StrandingChain.h"
@@ -13,17 +16,21 @@ USCSkill_Heal::USCSkill_Heal()
 
 bool USCSkill_Heal::Execute_Implementation(AActor* Caster, const TArray<AActor*>& Targets)
 {
-	if (!IsValid(Caster)) { return false; }
-	for (AActor* Target : Targets)
+	if (!IsValid(Caster))
 	{
-		if (ASCCharacterBase* Char = Cast<ASCCharacterBase>(Target))
-		{
-			// 회복 = 음수 데미지
-			int32 Healed = FMath::Min(HealAmount, Char->MaxHP - Char->CurrentHP);
-			Char->CurrentHP = FMath::Min(Char->CurrentHP + HealAmount, Char->MaxHP);
-			UE_LOG(LogStrandingChain, Log,
-				TEXT("[Heal] %s → %s, 회복=%d"), *Caster->GetName(), *Target->GetName(), Healed);
-		}
+		UE_LOG(LogStrandingChain, Warning, TEXT("[SCSkill_Heal] Caster 유효하지 않음."));
+		return false;
 	}
+
+	ASCCharacterBase* CasterChar = Cast<ASCCharacterBase>(Caster);
+	if (!IsValid(CasterChar))
+	{
+		UE_LOG(LogStrandingChain, Warning, TEXT("[SCSkill_Heal] Caster가 SCCharacterBase가 아님."));
+		return false;
+	}
+
+	CasterChar->ApplyHeal(HealAmount);
+	UE_LOG(LogStrandingChain, Log,
+		TEXT("[SCSkill_Heal] %s 자가회복 +%d"), *Caster->GetName(), HealAmount);
 	return true;
 }

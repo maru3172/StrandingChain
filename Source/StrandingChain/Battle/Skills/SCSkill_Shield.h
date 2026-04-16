@@ -1,5 +1,7 @@
-﻿// File: Source/StrandingChain/Battle/Skills/SCSkill_Shield.h
-// 더미 스킬 5: 방어 태세 (코스트 소모 1, 탱커 전용 더미)
+﻿// Copyright StrandingChain. All Rights Reserved.
+// File: Source/StrandingChain/Battle/Skills/SCSkill_Shield.h
+// 방어막 스킬 — 시전자에게 TempShield 부여, 피해 흡수 후 소멸
+
 #pragma once
 #include "CoreMinimal.h"
 #include "Battle/SCSkillBase.h"
@@ -12,4 +14,8 @@ class STRANDINGCHAIN_API USCSkill_Shield : public USCSkillBase
 public:
 	USCSkill_Shield();
 	virtual bool Execute_Implementation(AActor* Caster, const TArray<AActor*>& Targets) override;
+
+	/** 부여할 방어막 수치 */
+	UPROPERTY(EditDefaultsOnly, Category = "SC|Skill", meta = (ClampMin = 1))
+	int32 ShieldAmount = 20;
 };

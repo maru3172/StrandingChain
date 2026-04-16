@@ -18,7 +18,8 @@ ASCPlaceholderCharacter::ASCPlaceholderCharacter()
 	DebugMesh->SetupAttachment(GetCapsuleComponent());
 	DebugMesh->SetRelativeLocation(FVector(0.f, 0.f, -90.f));
 	DebugMesh->SetRelativeScale3D(FVector(0.5f, 0.5f, 1.8f));
-	DebugMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	DebugMesh->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
+	DebugMesh->SetCollisionResponseToChannel(ECC_Visibility, ECR_Block);
 	DebugMesh->SetCastShadow(true);
 
 	static ConstructorHelpers::FObjectFinder<UStaticMesh> CylinderMesh(
