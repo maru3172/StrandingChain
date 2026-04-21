@@ -4,7 +4,6 @@
 #include "UI/SCSkillQueueSlotWidget.h"
 #include "UI/SCSkillCardWidget.h"
 #include "UI/SCSkillQueueWidget.h"
-#include "Blueprint/DragDropOperation.h"
 #include "StrandingChain.h"
 
 void USCSkillQueueSlotWidget::PlaceCard(USCSkillCardWidget* Card)
@@ -13,7 +12,7 @@ void USCSkillQueueSlotWidget::PlaceCard(USCSkillCardWidget* Card)
 	SlottedCard = Card;
 	OnSlotFilled(Card);
 	UE_LOG(LogStrandingChain, Log,
-		TEXT("[SCSkillQueueSlot] 슬롯[%d] 카드 등록: %s"), SlotIndex, *Card->GetName());
+		TEXT("[SCSkillQueueSlot] 슬롯[%d] 카드 등록."), SlotIndex);
 }
 
 USCSkillCardWidget* USCSkillQueueSlotWidget::TakeCard()
@@ -24,43 +23,20 @@ USCSkillCardWidget* USCSkillQueueSlotWidget::TakeCard()
 	return Card;
 }
 
-bool USCSkillQueueSlotWidget::NativeOnDrop(const FGeometry& InGeometry, const FDragDropEvent& InDragDropEvent, UDragDropOperation* InOperation)
+FReply USCSkillQueueSlotWidget::NativeOnMouseButtonDown(
+	const FGeometry& InGeometry, const FPointerEvent& InMouseEvent)
 {
-	Super::NativeOnDrop(InGeometry, InDragDropEvent, InOperation);
-
-	if (!IsEmpty())
-	{
-		UE_LOG(LogStrandingChain, Log, TEXT("[SCSkillQueueSlot] 슬롯[%d] 이미 차있음 — 거부."), SlotIndex);
-		return false;
-	}
-
-	USCSkillCardWidget* DraggedCard = Cast<USCSkillCardWidget>(InOperation->Payload);
-	if (!IsValid(DraggedCard)) { return false; }
-
-	USCSkillQueueWidget* Queue = OwnerQueue.Get();
-	if (!IsValid(Queue)) { return false; }
-
-	Queue->RegisterCardToSlot(DraggedCard, this);
-	return true;
-}
-
-FReply USCSkillQueueSlotWidget::NativeOnMouseButtonDown(const FGeometry& InGeometry, const FPointerEvent& InMouseEvent)
-{
-	// 우클릭 → 카드 원위치 반환
-	if (InMouseEvent.GetEffectingButton() == EKeys::RightMouseButton && !IsEmpty())
+	// 좌클릭 → 슬롯 해제
+	if (InMouseEvent.GetEffectingButton() == EKeys::LeftMouseButton && !IsEmpty())
 	{
 		USCSkillQueueWidget* Queue = OwnerQueue.Get();
 		if (IsValid(Queue))
 		{
 			Queue->ReturnCardFromSlot(this);
+			UE_LOG(LogStrandingChain, Log,
+				TEXT("[SCSkillQueueSlot] 슬롯[%d] 좌클릭으로 카드 해제."), SlotIndex);
 		}
 		return FReply::Handled();
 	}
 	return Super::NativeOnMouseButtonDown(InGeometry, InMouseEvent);
-}
-
-bool USCSkillQueueSlotWidget::NativeOnDragOver(const FGeometry& InGeometry, const FDragDropEvent& InDragDropEvent, UDragDropOperation* InOperation)
-{
-	Super::NativeOnDragOver(InGeometry, InDragDropEvent, InOperation);
-	return IsEmpty();
 }

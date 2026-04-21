@@ -32,17 +32,19 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "SC|Queue")
 	void ReturnCardFromSlot(USCSkillQueueSlotWidget* InSlot);
 
-	/**
-	 * 현재 큐 슬롯에 채워진 카드들의 DrawnIndex 배열 반환
-	 * PlayerController::ConfirmSkillQueue()에서 호출하여 EnqueueSkill에 전달
-	 */
+	/** 현재 큐 슬롯에 채워진 카드들의 DrawnIndex 배열 반환 */
 	UFUNCTION(BlueprintCallable, Category = "SC|Queue")
 	TArray<int32> GetQueuedDrawnIndices() const;
+
+	/** 첫 번째 빈 슬롯 반환 — SCSkillPanelWidget에서 클릭 등록 시 사용 */
+	UFUNCTION(BlueprintCallable, Category = "SC|Queue")
+	USCSkillQueueSlotWidget* FindFirstEmptySlot() const;
 
 protected:
 	UPROPERTY(BlueprintReadWrite, meta = (BindWidget))
 	TObjectPtr<UHorizontalBox> SlotContainer;
 
 private:
+	UPROPERTY()
 	TArray<TObjectPtr<USCSkillQueueSlotWidget>> Slots;
 };

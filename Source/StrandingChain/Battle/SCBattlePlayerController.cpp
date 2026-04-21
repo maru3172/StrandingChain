@@ -79,7 +79,13 @@ void ASCBattlePlayerController::BeginPlay()
 						QueueWidget->SetDesiredSizeInViewport(FVector2D(400.f, 120.f));
 					}
 					SkillPanelWidget->QueueWidgetInstance = QueueWidget;
+					UE_LOG(LogStrandingChain, Log, TEXT("[SCBattlePC] QueueWidget 생성 완료."));
 				}
+			}
+			else
+			{
+				UE_LOG(LogStrandingChain, Warning,
+					TEXT("[SCBattlePC] QueueWidgetClass 미설정 — 큐 패널 없이 동작."));
 			}
 			UE_LOG(LogStrandingChain, Log, TEXT("[SCBattlePC] SkillPanelWidget 생성 완료."));
 		}
@@ -210,9 +216,6 @@ void ASCBattlePlayerController::CloseSkillPanel()
 	SetInputMode(Mode);
 }
 
-// ── TurnManager 델리게이트 콜백 ──────────────────────────────────────────────
-// 파라미터명 InCharacter — AController::Character 섀도잉 방지
-
 void ASCBattlePlayerController::OnCharacterTurnBeginHandler(ASCCharacterBase* InCharacter)
 {
 	if (!IsValid(InCharacter)) { return; }
@@ -222,15 +225,13 @@ void ASCBattlePlayerController::OnCharacterTurnBeginHandler(ASCCharacterBase* In
 		SelectedCharacter = InCharacter;
 		OpenSkillPanel(InCharacter);
 		UE_LOG(LogStrandingChain, Log,
-			TEXT("[SCBattlePC] TeamA 턴 → 패널 자동 열기: %s"), *InCharacter->GetName());
+			TEXT("[SCBattlePC] TeamA 턴 → 패널 열기: %s"), *InCharacter->GetName());
 	}
 	else
 	{
 		CloseSkillPanel();
 	}
 }
-
-// ── 배틀 액션 ─────────────────────────────────────────────────────────────────
 
 void ASCBattlePlayerController::ConfirmSkillQueue()
 {
@@ -245,18 +246,24 @@ void ASCBattlePlayerController::ConfirmSkillQueue()
 		return;
 	}
 
-	if (IsValid(SkillPanelWidget) && IsValid(SkillPanelWidget->QueueWidgetInstance))
+	if (!IsValid(SkillPanelWidget))
 	{
-		TArray<int32> Indices =
-			SkillPanelWidget->QueueWidgetInstance->GetQueuedDrawnIndices();
-		Actor->SkillQueue.Empty();
-		for (int32 Idx : Indices)
-		{
-			Actor->EnqueueSkill(Idx);
-		}
-		UE_LOG(LogStrandingChain, Log,
-			TEXT("[SCBattlePC] SkillQueue 구성: %d개"), Indices.Num());
+		UE_LOG(LogStrandingChain, Warning,
+			TEXT("[SCBattlePC] ConfirmSkillQueue: SkillPanelWidget 없음."));
+		return;
 	}
+
+	// GetEnqueuedDrawnIndices: QueueWidget 유/무 모두 처리
+	TArray<int32> Indices = SkillPanelWidget->GetEnqueuedDrawnIndices();
+
+	Actor->SkillQueue.Empty();
+	for (int32 Idx : Indices)
+	{
+		Actor->EnqueueSkill(Idx);
+	}
+
+	UE_LOG(LogStrandingChain, Log,
+		TEXT("[SCBattlePC] SkillQueue 구성: %d개"), Actor->SkillQueue.Num());
 
 	TArray<ASCCharacterBase*> Enemies = TM->GetAliveCharsOfTeam(ESCTeam::TeamB);
 	TArray<AActor*> Targets;

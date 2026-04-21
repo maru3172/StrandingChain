@@ -45,7 +45,6 @@ void USCSkillQueueWidget::RegisterCardToSlot(
 	USCSkillCardWidget* Card, USCSkillQueueSlotWidget* InSlot)
 {
 	if (!IsValid(Card) || !IsValid(InSlot)) { return; }
-	Card->SetVisibility(ESlateVisibility::HitTestInvisible);
 	InSlot->PlaceCard(Card);
 	UE_LOG(LogStrandingChain, Log,
 		TEXT("[SCSkillQueueWidget] 카드 → 슬롯[%d]"), InSlot->SlotIndex);
@@ -54,17 +53,14 @@ void USCSkillQueueWidget::RegisterCardToSlot(
 void USCSkillQueueWidget::ReturnCardFromSlot(USCSkillQueueSlotWidget* InSlot)
 {
 	if (!IsValid(InSlot)) { return; }
-	USCSkillCardWidget* Card = InSlot->TakeCard();
-	if (!IsValid(Card)) { return; }
-	Card->SetVisibility(ESlateVisibility::Visible);
+	InSlot->TakeCard();
 	UE_LOG(LogStrandingChain, Log,
-		TEXT("[SCSkillQueueWidget] 카드 반환 ← 슬롯[%d]"), InSlot->SlotIndex);
+		TEXT("[SCSkillQueueWidget] 슬롯[%d] 해제."), InSlot->SlotIndex);
 }
 
 TArray<int32> USCSkillQueueWidget::GetQueuedDrawnIndices() const
 {
 	TArray<int32> Result;
-	// 루프 변수명 SlotEntry — UWidget::Slot 멤버 섀도잉 방지
 	for (const TObjectPtr<USCSkillQueueSlotWidget>& SlotEntry : Slots)
 	{
 		if (!IsValid(SlotEntry) || SlotEntry->IsEmpty()) { continue; }
@@ -75,4 +71,16 @@ TArray<int32> USCSkillQueueWidget::GetQueuedDrawnIndices() const
 		}
 	}
 	return Result;
+}
+
+USCSkillQueueSlotWidget* USCSkillQueueWidget::FindFirstEmptySlot() const
+{
+	for (const TObjectPtr<USCSkillQueueSlotWidget>& SlotEntry : Slots)
+	{
+		if (IsValid(SlotEntry) && SlotEntry->IsEmpty())
+		{
+			return SlotEntry.Get();
+		}
+	}
+	return nullptr;
 }

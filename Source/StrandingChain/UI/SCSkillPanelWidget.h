@@ -1,4 +1,6 @@
 ﻿// Copyright StrandingChain. All Rights Reserved.
+// File: Source/StrandingChain/UI/SCSkillPanelWidget.h
+
 #pragma once
 
 #include "CoreMinimal.h"
@@ -7,6 +9,7 @@
 
 class USCSkillCardWidget;
 class USCSkillQueueWidget;
+class USCSkillQueueSlotWidget;
 class ASCCharacterBase;
 class USCSkillBase;
 class UHorizontalBox;
@@ -17,16 +20,14 @@ class STRANDINGCHAIN_API USCSkillPanelWidget : public UUserWidget
 	GENERATED_BODY()
 
 public:
-	/** 카드 위젯 클래스 */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "SC|Panel")
 	TSubclassOf<USCSkillCardWidget> SkillCardClass;
 
-	/** 큐 위젯 클래스 — 화면 중앙에 별도로 띄울 위젯 */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "SC|Panel")
 	TSubclassOf<USCSkillQueueWidget> QueueWidgetClass;
 
 	UFUNCTION(BlueprintCallable, Category = "SC|Panel")
-	void OpenPanel(ASCCharacterBase* Character);
+	void OpenPanel(ASCCharacterBase* InCharacter);
 
 	UFUNCTION(BlueprintCallable, Category = "SC|Panel")
 	void ClosePanel();
@@ -35,6 +36,16 @@ public:
 	ASCCharacterBase* GetSelectedCharacter() const { return SelectedCharacter.Get(); }
 
 	bool IsMouseOverPanelContent() const;
+
+	/** 현재 bEnqueued=true인 카드들의 DrawnIndex 목록 반환 (등록 순서 유지) */
+	UFUNCTION(BlueprintCallable, Category = "SC|Panel")
+	TArray<int32> GetEnqueuedDrawnIndices() const;
+
+	UFUNCTION(BlueprintPure, Category = "SC|Panel")
+	int32 GetEnqueuedCount() const { return EnqueuedCount; }
+
+	UPROPERTY(BlueprintReadOnly, Category = "SC|Panel")
+	TObjectPtr<USCSkillQueueWidget> QueueWidgetInstance;
 
 	UFUNCTION(BlueprintImplementableEvent, Category = "SC|Panel")
 	void PlayOpenAnimation();
@@ -45,10 +56,6 @@ public:
 	UFUNCTION(BlueprintImplementableEvent, Category = "SC|Panel")
 	void OnCardsReady(const TArray<USCSkillCardWidget*>& Cards);
 
-	/** 큐 위젯 인스턴스 (PlayerController에서 접근용) */
-	UPROPERTY(BlueprintReadOnly, Category = "SC|Panel")
-	TObjectPtr<USCSkillQueueWidget> QueueWidgetInstance;
-
 protected:
 	UPROPERTY(BlueprintReadWrite, meta = (BindWidget))
 	TObjectPtr<UHorizontalBox> CardContainer;
@@ -57,6 +64,17 @@ private:
 	TWeakObjectPtr<ASCCharacterBase> SelectedCharacter;
 	TArray<TObjectPtr<USCSkillCardWidget>> DrawnCardWidgets;
 
-	void BuildCards(ASCCharacterBase* Character);
+	/** 등록 순서를 기억하는 배열 — QueueWidget 없을 때도 순서 보장 */
+	TArray<int32> EnqueuedDrawnIndices;
+
+	int32 EnqueuedCount = 0;
+
+	void BuildCards(ASCCharacterBase* InCharacter);
 	void ClearCards();
+
+	UFUNCTION()
+	void OnCardClicked(USCSkillBase* InSkill, int32 InDrawnIndex);
+
+	void DequeueCardByDrawnIndex(int32 InDrawnIndex);
+	USCSkillCardWidget* FindCardWidgetByDrawnIndex(int32 InDrawnIndex) const;
 };

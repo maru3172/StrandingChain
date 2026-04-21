@@ -1,7 +1,5 @@
 ﻿// Copyright StrandingChain. All Rights Reserved.
 // File: Source/StrandingChain/UI/SCSkillCardWidget.h
-// 역할: 드로우된 스킬 1장 카드
-//       Blueprint(WBP_SkillCard)에서 텍스트/버튼 배치 후 InitCard() 호출
 
 #pragma once
 
@@ -20,33 +18,42 @@ class STRANDINGCHAIN_API USCSkillCardWidget : public UUserWidget
 	GENERATED_BODY()
 
 public:
-	// ── 데이터 ──────────────────────────────
 	UPROPERTY(BlueprintReadOnly, Category = "SC|Card")
 	TObjectPtr<USCSkillBase> SkillRef;
 
-	/** DrawnSkills 배열 인덱스 (0~2) */
 	UPROPERTY(BlueprintReadOnly, Category = "SC|Card")
 	int32 DrawnIndex = 0;
 
-	// ── 델리게이트 ───────────────────────────
+	/** 큐에 등록됐는지 여부 */
+	UPROPERTY(BlueprintReadOnly, Category = "SC|Card")
+	bool bEnqueued = false;
+
 	UPROPERTY(BlueprintAssignable, Category = "SC|Card")
 	FOnSkillCardClicked OnSkillCardClicked;
 
-	// ── C++ API ──────────────────────────────
-	/** 스킬 카드 초기화 — Panel에서 호출 */
 	UFUNCTION(BlueprintCallable, Category = "SC|Card")
 	void InitCard(USCSkillBase* InSkill, int32 InDrawnIndex);
 
-	/** Blueprint 버튼 OnClicked에서 호출 */
+	UFUNCTION(BlueprintCallable, Category = "SC|Card")
+	void SetEnqueued(bool bInEnqueued);
+
+	/**
+	 * Blueprint의 Button OnClicked에서 호출.
+	 * WBP_SkillCard 안에 Button 위젯을 쓰는 경우
+	 * Button → OnClicked → NotifyClicked 연결.
+	 */
 	UFUNCTION(BlueprintCallable, Category = "SC|Card")
 	void NotifyClicked();
 
-	// ── Blueprint 이벤트 ─────────────────────
-	/** 카드 내용 갱신 — Blueprint에서 텍스트/이미지 세팅 */
 	UFUNCTION(BlueprintImplementableEvent, Category = "SC|Card")
 	void OnCardInitialized(const FSCSkillData& SkillData);
 
+	/** True = 등록됨(어둡게), False = 미등록(원래대로) */
+	UFUNCTION(BlueprintImplementableEvent, Category = "SC|Card")
+	void OnEnqueueStateChanged(bool bIsEnqueued);
+
 protected:
-	virtual FReply NativeOnPreviewMouseButtonDown(const FGeometry& InGeometry, const FPointerEvent& InMouseEvent) override;
-	virtual void NativeOnDragDetected(const FGeometry& InGeometry, const FPointerEvent& InMouseEvent, UDragDropOperation*& OutOperation) override;
+	/** Button 없이 위젯 자체를 클릭 가능하게 쓸 때 사용 */
+	virtual FReply NativeOnMouseButtonDown(
+		const FGeometry& InGeometry, const FPointerEvent& InMouseEvent) override;
 };
