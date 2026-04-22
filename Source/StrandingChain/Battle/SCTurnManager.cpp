@@ -38,70 +38,61 @@ void USCTurnManager::StartBattle(
 		return;
 	}
 
-	TurnOrder.Empty();
-	for (ASCCharacterBase* Char : TeamAChars)
-		if (ensureMsgf(IsValid(Char), TEXT("[SCTurnManager] TeamA 유효하지 않은 캐릭터")))
-			TurnOrder.Add(Char);
-	for (ASCCharacterBase* Char : TeamBChars)
-		if (ensureMsgf(IsValid(Char), TEXT("[SCTurnManager] TeamB 유효하지 않은 캐릭터")))
-			TurnOrder.Add(Char);
+	TeamACharsAll.Empty();
+	TeamBOrder.Empty();
 
-	TurnNumber = 0;
-	CurrentActorIndex = 0;
+	for (ASCCharacterBase* A : TeamAChars)
+	{
+		if (ensureMsgf(IsValid(A), TEXT("[SCTurnManager] TeamA 유효하지 않음")))
+			TeamACharsAll.Add(A);
+	}
+	for (ASCCharacterBase* B : TeamBChars)
+	{
+		if (ensureMsgf(IsValid(B), TEXT("[SCTurnManager] TeamB 유효하지 않음")))
+			TeamBOrder.Add(B);
+	}
+
+	TeamBIndex = 0;
+	TurnNumber = 1;
+	bIsPlayerTurn = true;
 
 	TeamAState->ResetCost(3);
 	TeamBState->ResetCost(3);
 
 	UE_LOG(LogStrandingChain, Log,
-		TEXT("[SCTurnManager] 배틀 시작. 총 캐릭터=%d"), TurnOrder.Num());
+		TEXT("[SCTurnManager] 배틀 시작. 턴 구조: 플레이어(자유선택) → B%d → 반복"),
+		TeamBIndex);
+
 	SetPhase(ESCBattlePhase::DrawPhase);
+	OnPlayerTurnStarted.Broadcast();
 }
 
-void USCTurnManager::AdvanceToNextPhase()
+void USCTurnManager::ConfirmAndExecuteQueue(
+	ASCCharacterBase* PlayerChar, const TArray<AActor*>& Targets)
 {
-	switch (CurrentPhase)
-	{
-	case ESCBattlePhase::DrawPhase:
-		SetPhase(ESCBattlePhase::PlayerQueuePhase);
-		break;
-	case ESCBattlePhase::ExecutePhase:
-		SetPhase(ESCBattlePhase::ResultPhase);
-		break;
-	case ESCBattlePhase::ResultPhase:
-		AdvanceActorIndex();
-		break;
-	default:
-		break;
-	}
-}
-
-void USCTurnManager::ConfirmAndExecuteQueue(const TArray<AActor*>& Targets)
-{
-	if (CurrentPhase != ESCBattlePhase::PlayerQueuePhase)
+	if (!bIsPlayerTurn)
 	{
 		UE_LOG(LogStrandingChain, Warning,
-			TEXT("[SCTurnManager] ConfirmAndExecuteQueue: PlayerQueuePhase가 아님."));
+			TEXT("[SCTurnManager] ConfirmAndExecuteQueue: 지금은 AI 턴."));
 		return;
 	}
-
-	ASCCharacterBase* Actor = GetCurrentActor();
-	if (!IsValid(Actor))
+	if (!IsValid(PlayerChar) || PlayerChar->Team != ESCTeam::TeamA)
 	{
 		UE_LOG(LogStrandingChain, Error,
-			TEXT("[SCTurnManager] ConfirmAndExecuteQueue: CurrentActor 유효하지 않음."));
+			TEXT("[SCTurnManager] ConfirmAndExecuteQueue: PlayerChar 유효하지 않음."));
 		return;
 	}
-
-	USCTeamState* TeamState = GetTeamState(Actor->Team);
-	if (!IsValid(TeamState))
+	if (PlayerChar->IsDead())
 	{
-		UE_LOG(LogStrandingChain, Error,
-			TEXT("[SCTurnManager] TeamState 유효하지 않음."));
+		UE_LOG(LogStrandingChain, Warning,
+			TEXT("[SCTurnManager] ConfirmAndExecuteQueue: 사망한 캐릭터 선택."));
 		return;
 	}
 
+	// ── 코스트 검증 ─────────────────────────────────────────────────────
+	USCTeamState* TeamState = TeamAState;
 	int32 TotalConsume = 0, TotalGenerate = 0;
-	for (TObjectPtr<USCSkillBase> Skill : Actor->SkillQueue)
+	for (const TObjectPtr<USCSkillBase>& Skill : PlayerChar->SkillQueue)
 	{
 		if (!IsValid(Skill)) { continue; }
 		if (Skill->SkillData.CostType == ESCSkillCostType::Consume)
@@ -117,55 +108,99 @@ void USCTurnManager::ConfirmAndExecuteQueue(const TArray<AActor*>& Targets)
 			TEXT("[SCTurnManager] 코스트 부족 (순소모=%d). 실행 취소."), NetConsume);
 		return;
 	}
-	if (NetConsume < 0)
-	{
-		TeamState->AddCost(-NetConsume);
-	}
+	if (NetConsume < 0) { TeamState->AddCost(-NetConsume); }
 
+	// ── 플레이어 스킬 실행 ───────────────────────────────────────────────
 	SetPhase(ESCBattlePhase::ExecutePhase);
-	Actor->ExecuteSkillQueue(Targets);
+	PlayerChar->ExecuteSkillQueue(Targets);
 	SetPhase(ESCBattlePhase::ResultPhase);
 
-	if (!CheckBattleEnd())
+	PlayerChar->bHasActedThisTurn = true;
+
+	UE_LOG(LogStrandingChain, Log,
+		TEXT("[SCTurnManager] 플레이어 실행 완료: %s"), *PlayerChar->GetName());
+
+	if (CheckBattleEnd()) { return; }
+
+	// ── AI 턴으로 전환 ───────────────────────────────────────────────────
+	bIsPlayerTurn = false;
+	ASCCharacterBase* AIChar = FindNextAliveTeamBChar();
+	if (!IsValid(AIChar))
 	{
-		AdvanceActorIndex();
+		// 살아있는 TeamB 없음 → 배틀 종료
+		CheckBattleEnd();
+		return;
 	}
+
+	AIChar->BeginTurn();
+	SetPhase(ESCBattlePhase::DrawPhase);
+	OnCharacterTurnBegin.Broadcast(AIChar);
 }
 
 void USCTurnManager::SkipCurrentActorTurn()
 {
-	if (CurrentPhase != ESCBattlePhase::DrawPhase &&
-		CurrentPhase != ESCBattlePhase::PlayerQueuePhase)
+	if (!bIsPlayerTurn)
 	{
 		UE_LOG(LogStrandingChain, Warning,
-			TEXT("[SCTurnManager] SkipCurrentActorTurn: Draw/Queue 페이즈가 아님."));
+			TEXT("[SCTurnManager] SkipCurrentActorTurn: 플레이어 턴이 아님."));
 		return;
 	}
 
-	ASCCharacterBase* Actor = GetCurrentActor();
-	if (IsValid(Actor))
-	{
-		Actor->bHasActedThisTurn = true;
-		Actor->SkillQueue.Empty();
-		Actor->DrawnSkills.Empty();
-	}
-
-	UE_LOG(LogStrandingChain, Log,
-		TEXT("[SCTurnManager] 현재 액터 턴 건너뜀: %s"),
-		IsValid(Actor) ? *Actor->GetName() : TEXT("None"));
+	UE_LOG(LogStrandingChain, Log, TEXT("[SCTurnManager] 플레이어 턴 건너뜀."));
 
 	SetPhase(ESCBattlePhase::ResultPhase);
+	if (CheckBattleEnd()) { return; }
 
-	if (!CheckBattleEnd())
+	// 건너뛰어도 AI 턴은 진행
+	bIsPlayerTurn = false;
+	ASCCharacterBase* AIChar = FindNextAliveTeamBChar();
+	if (!IsValid(AIChar))
 	{
-		AdvanceActorIndex();
+		CheckBattleEnd();
+		return;
 	}
+
+	AIChar->BeginTurn();
+	SetPhase(ESCBattlePhase::DrawPhase);
+	OnCharacterTurnBegin.Broadcast(AIChar);
 }
 
-ASCCharacterBase* USCTurnManager::GetCurrentActor() const
+void USCTurnManager::AdvanceAfterAITurn()
 {
-	if (!TurnOrder.IsValidIndex(CurrentActorIndex)) { return nullptr; }
-	return TurnOrder[CurrentActorIndex].Get();
+	if (bIsPlayerTurn)
+	{
+		UE_LOG(LogStrandingChain, Warning,
+			TEXT("[SCTurnManager] AdvanceAfterAITurn: 이미 플레이어 턴."));
+		return;
+	}
+
+	// ── 다음 TeamB 인덱스로 이동 ────────────────────────────────────────
+	TeamBIndex++;
+	if (TeamBIndex >= TeamBOrder.Num())
+	{
+		// 한 라운드 완료
+		TeamBIndex = 0;
+		TurnNumber++;
+		OnTurnChanged.Broadcast(TurnNumber);
+		UE_LOG(LogStrandingChain, Log,
+			TEXT("[SCTurnManager] 라운드 종료 → 턴 %d 시작"), TurnNumber);
+	}
+
+	if (CheckBattleEnd()) { return; }
+
+	// ── 플레이어 턴으로 전환 ────────────────────────────────────────────
+	bIsPlayerTurn = true;
+	SetPhase(ESCBattlePhase::DrawPhase);
+
+	UE_LOG(LogStrandingChain, Log, TEXT("[SCTurnManager] 플레이어 턴 시작."));
+	OnPlayerTurnStarted.Broadcast();
+}
+
+ASCCharacterBase* USCTurnManager::GetCurrentAIActor() const
+{
+	if (bIsPlayerTurn) { return nullptr; }
+	if (!TeamBOrder.IsValidIndex(TeamBIndex)) { return nullptr; }
+	return TeamBOrder[TeamBIndex].Get();
 }
 
 USCTeamState* USCTurnManager::GetTeamState(ESCTeam Team) const
@@ -175,71 +210,27 @@ USCTeamState* USCTurnManager::GetTeamState(ESCTeam Team) const
 
 TArray<ASCCharacterBase*> USCTurnManager::GetAliveCharsOfTeam(ESCTeam Team) const
 {
-	return GetAliveCharacters(Team);
+	TArray<ASCCharacterBase*> Result;
+	const TArray<TWeakObjectPtr<ASCCharacterBase>>& Source =
+		(Team == ESCTeam::TeamA) ? TeamACharsAll : TeamBOrder;
+	for (const TWeakObjectPtr<ASCCharacterBase>& W : Source)
+	{
+		ASCCharacterBase* C = W.Get();
+		if (IsValid(C) && !C->IsDead()) { Result.Add(C); }
+	}
+	return Result;
 }
 
 void USCTurnManager::SetPhase(ESCBattlePhase NewPhase)
 {
 	CurrentPhase = NewPhase;
-	UE_LOG(LogStrandingChain, Log,
-		TEXT("[SCTurnManager] Phase=%d, Turn=%d, ActorIdx=%d"),
-		static_cast<int32>(NewPhase), TurnNumber, CurrentActorIndex);
 	OnBattlePhaseChanged.Broadcast(NewPhase);
-
-	if (NewPhase == ESCBattlePhase::DrawPhase)
-		BeginDrawPhase();
-	else if (NewPhase == ESCBattlePhase::PlayerQueuePhase)
-		BeginPlayerQueuePhase();
-}
-
-void USCTurnManager::BeginDrawPhase()
-{
-	ASCCharacterBase* Actor = GetCurrentActor();
-	if (!IsValid(Actor)) { return; }
-	Actor->BeginTurn();
-	OnCharacterTurnBegin.Broadcast(Actor);
-}
-
-void USCTurnManager::BeginPlayerQueuePhase()
-{
-}
-
-void USCTurnManager::AdvanceActorIndex()
-{
-	++CurrentActorIndex;
-
-	while (TurnOrder.IsValidIndex(CurrentActorIndex))
-	{
-		ASCCharacterBase* Next = TurnOrder[CurrentActorIndex].Get();
-		if (IsValid(Next) && !Next->IsDead()) { break; }
-		++CurrentActorIndex;
-	}
-
-	if (!TurnOrder.IsValidIndex(CurrentActorIndex))
-	{
-		++TurnNumber;
-		CurrentActorIndex = 0;
-		OnTurnChanged.Broadcast(TurnNumber);
-		UE_LOG(LogStrandingChain, Log, TEXT("[SCTurnManager] 새 턴: %d"), TurnNumber);
-
-		while (TurnOrder.IsValidIndex(CurrentActorIndex))
-		{
-			ASCCharacterBase* Next = TurnOrder[CurrentActorIndex].Get();
-			if (IsValid(Next) && !Next->IsDead()) { break; }
-			++CurrentActorIndex;
-		}
-	}
-
-	if (TurnOrder.IsValidIndex(CurrentActorIndex))
-	{
-		SetPhase(ESCBattlePhase::DrawPhase);
-	}
 }
 
 bool USCTurnManager::CheckBattleEnd()
 {
-	TArray<ASCCharacterBase*> AliveA = GetAliveCharacters(ESCTeam::TeamA);
-	TArray<ASCCharacterBase*> AliveB = GetAliveCharacters(ESCTeam::TeamB);
+	TArray<ASCCharacterBase*> AliveA = GetAliveCharsOfTeam(ESCTeam::TeamA);
+	TArray<ASCCharacterBase*> AliveB = GetAliveCharsOfTeam(ESCTeam::TeamB);
 
 	if (AliveA.IsEmpty() || AliveB.IsEmpty())
 	{
@@ -253,14 +244,19 @@ bool USCTurnManager::CheckBattleEnd()
 	return false;
 }
 
-TArray<ASCCharacterBase*> USCTurnManager::GetAliveCharacters(ESCTeam Team) const
+ASCCharacterBase* USCTurnManager::FindNextAliveTeamBChar()
 {
-	TArray<ASCCharacterBase*> Result;
-	for (const TWeakObjectPtr<ASCCharacterBase>& WeakChar : TurnOrder)
+	// TeamBIndex부터 순환하며 살아있는 TeamB 캐릭터 탐색
+	const int32 Total = TeamBOrder.Num();
+	for (int32 i = 0; i < Total; ++i)
 	{
-		ASCCharacterBase* Char = WeakChar.Get();
-		if (IsValid(Char) && Char->Team == Team && !Char->IsDead())
-			Result.Add(Char);
+		int32 Idx = (TeamBIndex + i) % Total;
+		ASCCharacterBase* C = TeamBOrder.IsValidIndex(Idx) ? TeamBOrder[Idx].Get() : nullptr;
+		if (IsValid(C) && !C->IsDead())
+		{
+			TeamBIndex = Idx; // 탐색 중 건너뛴 경우 인덱스 보정
+			return C;
+		}
 	}
-	return Result;
+	return nullptr;
 }

@@ -26,6 +26,10 @@ void USCSkillPanelWidget::OpenPanel(ASCCharacterBase* InCharacter)
 		QueueWidgetInstance->ClearSlots();
 		QueueWidgetInstance->InitSlots();
 		QueueWidgetInstance->SetVisibility(ESlateVisibility::Visible);
+
+		// 슬롯 취소 델리게이트 바인딩 — 색상 복구를 위해
+		QueueWidgetInstance->OnCardReturnedFromSlot.AddDynamic(
+			this, &USCSkillPanelWidget::OnQueueCardReturnedHandler);
 	}
 
 	UE_LOG(LogStrandingChain, Log,
@@ -39,6 +43,10 @@ void USCSkillPanelWidget::ClosePanel()
 
 	if (IsValid(QueueWidgetInstance))
 	{
+		// 델리게이트 언바인딩
+		QueueWidgetInstance->OnCardReturnedFromSlot.RemoveDynamic(
+			this, &USCSkillPanelWidget::OnQueueCardReturnedHandler);
+
 		QueueWidgetInstance->ClearSlots();
 		QueueWidgetInstance->SetVisibility(ESlateVisibility::Hidden);
 	}
@@ -100,49 +108,37 @@ void USCSkillPanelWidget::ClearCards()
 
 TArray<int32> USCSkillPanelWidget::GetEnqueuedDrawnIndices() const
 {
-	// QueueWidget이 있으면 슬롯 기반으로 반환 (순서 보장)
 	if (IsValid(QueueWidgetInstance))
 	{
 		return QueueWidgetInstance->GetQueuedDrawnIndices();
 	}
-	// 없으면 내부 등록 순서 배열 반환
 	return EnqueuedDrawnIndices;
 }
 
 void USCSkillPanelWidget::OnCardClicked(USCSkillBase* InSkill, int32 InDrawnIndex)
 {
-	if (!IsValid(InSkill))
-	{
-		UE_LOG(LogStrandingChain, Warning,
-			TEXT("[SCSkillPanel] OnCardClicked: InSkill 유효하지 않음."));
-		return;
-	}
+	if (!IsValid(InSkill)) { return; }
 
 	USCSkillCardWidget* ClickedCard = FindCardWidgetByDrawnIndex(InDrawnIndex);
-	if (!IsValid(ClickedCard))
-	{
-		UE_LOG(LogStrandingChain, Warning,
-			TEXT("[SCSkillPanel] OnCardClicked: 카드 없음 DrawnIndex=%d"), InDrawnIndex);
-		return;
-	}
+	if (!IsValid(ClickedCard)) { return; }
 
-	// ── 이미 등록된 카드 → 재클릭으로 해제 ──────────────────────────────
+	// 이미 등록된 카드 → 재클릭으로 해제
 	if (ClickedCard->bEnqueued)
 	{
 		DequeueCardByDrawnIndex(InDrawnIndex);
 		UE_LOG(LogStrandingChain, Log,
-			TEXT("[SCSkillPanel] 카드 해제: DrawnIndex=%d"), InDrawnIndex);
+			TEXT("[SCSkillPanel] 카드 해제(재클릭): DrawnIndex=%d"), InDrawnIndex);
 		return;
 	}
 
-	// ── 최대 3개 제한 ─────────────────────────────────────────────────────
+	// 최대 3개 제한
 	if (EnqueuedCount >= 3)
 	{
 		UE_LOG(LogStrandingChain, Log, TEXT("[SCSkillPanel] 큐 가득 참."));
 		return;
 	}
 
-	// ── QueueWidget 슬롯 표시 (있을 때만) ────────────────────────────────
+	// QueueWidget 슬롯 표시
 	if (IsValid(QueueWidgetInstance))
 	{
 		USCSkillQueueSlotWidget* EmptySlot = QueueWidgetInstance->FindFirstEmptySlot();
@@ -152,7 +148,7 @@ void USCSkillPanelWidget::OnCardClicked(USCSkillBase* InSkill, int32 InDrawnInde
 		}
 	}
 
-	// ── 카드 상태 변경 & 순서 기록 (QueueWidget 유무와 무관하게 반드시 실행) ──
+	// 카드 상태 변경 (QueueWidget 유무와 무관하게 반드시 실행)
 	ClickedCard->SetEnqueued(true);
 	EnqueuedDrawnIndices.Add(InDrawnIndex);
 	++EnqueuedCount;
@@ -162,9 +158,25 @@ void USCSkillPanelWidget::OnCardClicked(USCSkillBase* InSkill, int32 InDrawnInde
 		InDrawnIndex, EnqueuedCount);
 }
 
+void USCSkillPanelWidget::OnQueueCardReturnedHandler(int32 ReturnedDrawnIndex)
+{
+	// 큐 슬롯 클릭으로 취소됐을 때 호출
+	// 카드 색상 복구 + 내부 상태 동기화
+	USCSkillCardWidget* Card = FindCardWidgetByDrawnIndex(ReturnedDrawnIndex);
+	if (IsValid(Card) && Card->bEnqueued)
+	{
+		Card->SetEnqueued(false);  // → OnEnqueueStateChanged(false) → Blueprint 색상 복구
+		EnqueuedDrawnIndices.Remove(ReturnedDrawnIndex);
+		if (EnqueuedCount > 0) { --EnqueuedCount; }
+
+		UE_LOG(LogStrandingChain, Log,
+			TEXT("[SCSkillPanel] 슬롯 취소 → 카드 색상 복구: DrawnIndex=%d (남은 %d개)"),
+			ReturnedDrawnIndex, EnqueuedCount);
+	}
+}
+
 void USCSkillPanelWidget::DequeueCardByDrawnIndex(int32 InDrawnIndex)
 {
-	// ── QueueWidget이 있는 경우 슬롯 동기화 ─────────────────────────────
 	if (IsValid(QueueWidgetInstance))
 	{
 		TArray<int32> CurrentIndices = QueueWidgetInstance->GetQueuedDrawnIndices();
@@ -176,25 +188,24 @@ void USCSkillPanelWidget::DequeueCardByDrawnIndex(int32 InDrawnIndex)
 				if (Idx != InDrawnIndex) { Remaining.Add(Idx); }
 			}
 
-			for (TObjectPtr<USCSkillCardWidget>& Card : DrawnCardWidgets)
+			for (TObjectPtr<USCSkillCardWidget>& C : DrawnCardWidgets)
 			{
-				if (IsValid(Card)) { Card->SetEnqueued(false); }
+				if (IsValid(C)) { C->SetEnqueued(false); }
 			}
 
 			QueueWidgetInstance->ClearSlots();
 			QueueWidgetInstance->InitSlots();
-
 			EnqueuedDrawnIndices.Empty();
 			EnqueuedCount = 0;
 
 			for (int32 RemainIdx : Remaining)
 			{
-				USCSkillCardWidget* Card = FindCardWidgetByDrawnIndex(RemainIdx);
+				USCSkillCardWidget* C = FindCardWidgetByDrawnIndex(RemainIdx);
 				USCSkillQueueSlotWidget* NextSlot = QueueWidgetInstance->FindFirstEmptySlot();
-				if (IsValid(Card) && IsValid(NextSlot))
+				if (IsValid(C) && IsValid(NextSlot))
 				{
-					QueueWidgetInstance->RegisterCardToSlot(Card, NextSlot);
-					Card->SetEnqueued(true);
+					QueueWidgetInstance->RegisterCardToSlot(C, NextSlot);
+					C->SetEnqueued(true);
 					EnqueuedDrawnIndices.Add(RemainIdx);
 					++EnqueuedCount;
 				}
@@ -203,14 +214,13 @@ void USCSkillPanelWidget::DequeueCardByDrawnIndex(int32 InDrawnIndex)
 		}
 	}
 
-	// ── QueueWidget 없는 경우 ─────────────────────────────────────────────
+	// QueueWidget 없는 경우
 	USCSkillCardWidget* Card = FindCardWidgetByDrawnIndex(InDrawnIndex);
 	if (IsValid(Card) && Card->bEnqueued)
 	{
 		Card->SetEnqueued(false);
 		EnqueuedDrawnIndices.Remove(InDrawnIndex);
-		--EnqueuedCount;
-		if (EnqueuedCount < 0) { EnqueuedCount = 0; }
+		if (EnqueuedCount > 0) { --EnqueuedCount; }
 	}
 }
 

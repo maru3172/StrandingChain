@@ -34,6 +34,7 @@ void ASCBattleGameMode::BeginPlay()
 
 	TurnManager = Manager;
 
+	// TeamB AI 턴 시작 알림 바인딩
 	Manager->OnCharacterTurnBegin.AddDynamic(
 		this, &ASCBattleGameMode::OnCharacterTurnBeginHandler);
 
@@ -51,7 +52,6 @@ void ASCBattleGameMode::SetArenaCamera()
 	if (!IsValid(PC)) { return; }
 
 	PC->SetViewTargetWithBlend(ArenaActor, 0.f);
-	UE_LOG(LogStrandingChain, Log, TEXT("[SCBattleGameMode] 아레나 카메라 전환."));
 }
 
 void ASCBattleGameMode::InitiateBattle(
@@ -59,12 +59,7 @@ void ASCBattleGameMode::InitiateBattle(
 	const TArray<ASCCharacterBase*>& TeamBChars)
 {
 	USCTurnManager* Manager = TurnManager.Get();
-	if (!IsValid(Manager))
-	{
-		UE_LOG(LogStrandingChain, Error,
-			TEXT("[SCBattleGameMode] InitiateBattle: TurnManager 없음."));
-		return;
-	}
+	if (!IsValid(Manager)) { return; }
 	Manager->StartBattle(TeamAChars, TeamBChars);
 }
 
@@ -73,6 +68,9 @@ void ASCBattleGameMode::InitiateBattle(
 void ASCBattleGameMode::OnCharacterTurnBeginHandler(ASCCharacterBase* InCharacter)
 {
 	if (!IsValid(InCharacter)) { return; }
+
+	// TeamA 캐릭터 턴은 PlayerController가 처리
+	// GameMode는 TeamB만 처리
 	if (InCharacter->Team != ESCTeam::TeamB || InCharacter->IsDead()) { return; }
 
 	PendingAICharacter = InCharacter;
@@ -93,17 +91,16 @@ void ASCBattleGameMode::ExecuteAITurn()
 	ASCCharacterBase* InCharacter = PendingAICharacter.Get();
 	PendingAICharacter.Reset();
 
-	if (!IsValid(InCharacter) || InCharacter->IsDead()) { return; }
+	if (!IsValid(InCharacter) || InCharacter->IsDead())
+	{
+		// 사망한 경우 AI 턴 건너뛰고 플레이어 턴으로
+		USCTurnManager* TM = TurnManager.Get();
+		if (IsValid(TM)) { TM->AdvanceAfterAITurn(); }
+		return;
+	}
 
 	USCTurnManager* TM = TurnManager.Get();
 	if (!IsValid(TM)) { return; }
-
-	if (TM->GetCurrentActor() != InCharacter)
-	{
-		UE_LOG(LogStrandingChain, Warning,
-			TEXT("[SCBattleGameMode] ExecuteAITurn: 현재 액터 불일치."));
-		return;
-	}
 
 	// ── 스킬 선택 ────────────────────────────────────────────────────────────
 	USCTeamState* TeamState = TM->GetTeamState(ESCTeam::TeamB);
@@ -144,7 +141,7 @@ void ASCBattleGameMode::ExecuteAITurn()
 		}
 	}
 
-	// 코스트 부족으로 아무것도 못 넣은 경우 Generate 스킬이라도
+	// 코스트 부족 시 Generate 스킬이라도
 	if (InCharacter->SkillQueue.IsEmpty())
 	{
 		for (int32 DrawIdx : DrawIndices)
@@ -159,14 +156,42 @@ void ASCBattleGameMode::ExecuteAITurn()
 		}
 	}
 
-	// 타겟: TeamA 살아있는 전원
+	// ── 코스트 처리 ──────────────────────────────────────────────────────────
+	if (IsValid(TeamState))
+	{
+		int32 TotalConsume = 0, TotalGenerate = 0;
+		for (const TObjectPtr<USCSkillBase>& Skill : InCharacter->SkillQueue)
+		{
+			if (!IsValid(Skill)) { continue; }
+			if (Skill->SkillData.CostType == ESCSkillCostType::Consume)
+				TotalConsume += Skill->SkillData.CostAmount;
+			else
+				TotalGenerate += Skill->SkillData.CostAmount;
+		}
+		const int32 Net = TotalConsume - TotalGenerate;
+		if (Net > 0) TeamState->TryConsumeCost(Net);
+		else if (Net < 0) TeamState->AddCost(-Net);
+	}
+
+	// ── 스킬 실행 ────────────────────────────────────────────────────────────
 	TArray<ASCCharacterBase*> AliveA = TM->GetAliveCharsOfTeam(ESCTeam::TeamA);
 	TArray<AActor*> Targets;
-	for (ASCCharacterBase* T : AliveA) { if (IsValid(T)) Targets.Add(T); }
+
+	// 랜덤 단일 타겟 (AI는 랜덤으로 한 명 선택)
+	if (AliveA.Num() > 0)
+	{
+		int32 RandIdx = FMath::RandRange(0, AliveA.Num() - 1);
+		if (IsValid(AliveA[RandIdx]))
+			Targets.Add(AliveA[RandIdx]);
+	}
 
 	UE_LOG(LogStrandingChain, Log,
 		TEXT("[SCBattleGameMode] AI 실행: %s 큐=%d 타겟=%d"),
 		*InCharacter->GetName(), InCharacter->SkillQueue.Num(), Targets.Num());
 
-	TM->ConfirmAndExecuteQueue(Targets);
+	InCharacter->ExecuteSkillQueue(Targets);
+	InCharacter->bHasActedThisTurn = true;
+
+	// ── 플레이어 턴으로 복귀 ─────────────────────────────────────────────────
+	TM->AdvanceAfterAITurn();
 }

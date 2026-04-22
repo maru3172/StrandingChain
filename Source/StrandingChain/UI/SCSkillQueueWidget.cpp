@@ -53,9 +53,20 @@ void USCSkillQueueWidget::RegisterCardToSlot(
 void USCSkillQueueWidget::ReturnCardFromSlot(USCSkillQueueSlotWidget* InSlot)
 {
 	if (!IsValid(InSlot)) { return; }
-	InSlot->TakeCard();
-	UE_LOG(LogStrandingChain, Log,
-		TEXT("[SCSkillQueueWidget] 슬롯[%d] 해제."), InSlot->SlotIndex);
+
+	// TakeCard 전에 DrawnIndex 먼저 읽기
+	const USCSkillCardWidget* Card = InSlot->SlottedCard.Get();
+	const int32 DrawIdx = IsValid(Card) ? Card->DrawnIndex : INDEX_NONE;
+
+	InSlot->TakeCard();  // 슬롯 비우기 + OnSlotCleared 호출
+
+	// 패널에 취소 알림 → SetEnqueued(false) + 색상 복구 처리
+	if (DrawIdx != INDEX_NONE)
+	{
+		OnCardReturnedFromSlot.Broadcast(DrawIdx);
+		UE_LOG(LogStrandingChain, Log,
+			TEXT("[SCSkillQueueWidget] 슬롯 취소 → DrawnIndex=%d 알림."), DrawIdx);
+	}
 }
 
 TArray<int32> USCSkillQueueWidget::GetQueuedDrawnIndices() const
